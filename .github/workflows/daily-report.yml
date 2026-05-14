@@ -1,0 +1,95 @@
+name: Satir Model Daily Report
+
+on:
+  schedule:
+    - cron: "35 0 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Target date (YYYY-MM-DD), leave empty for today"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: "24"
+
+      - name: Determine date
+        id: date
+        run: |
+          INPUT_DATE="${{ github.event.inputs.date }}"
+          if [ -n "$INPUT_DATE" ]; then
+            TARGET="$INPUT_DATE"
+          else
+            TARGET=$(TZ=Asia/Taipei date +%Y-%m-%d)
+          fi
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch papers from PubMed
+        run: node scripts/fetch_papers.mjs
+        env:
+          TARGET_DATE: ${{ steps.date.outputs.target }}
+          DAYS_BACK: "7"
+          MAX_PAPERS: "40"
+        timeout-minutes: 10
+        continue-on-error: true
+
+      - name: Check papers data
+        id: papers
+        run: |
+          if [ -f papers.json ] && python3 -c "import json; json.load(open('papers.json'))" 2>/dev/null; then
+            COUNT=$(node -e "const d=require('./papers.json'); console.log((d.papers||[]).length)")
+            echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          else
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            echo '{"date":"unknown","count":0,"papers":[]}' > papers.json
+          fi
+
+      - name: Generate report with Zhipu AI
+        if: steps.papers.outputs.count != '0'
+        run: node scripts/generate_report.mjs
+        env:
+          TARGET_DATE: ${{ steps.date.outputs.target }}
+          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+          MAX_TOKENS: "50000"
+          TIMEOUT_MS: "480000"
+        timeout-minutes: 15
+
+      - name: Generate no-papers report
+        if: steps.papers.outputs.count == '0'
+        run: |
+          TARGET_DATE="${{ steps.date.outputs.target }}"
+          cat > "docs/satir-${TARGET_DATE}.html" << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>Satir Model Daily Report</title></head>
+          <body><h1>No new papers found</h1></body></html>
+          HTMLEOF
+
+      - name: Generate index page
+        run: node scripts/generate_index.mjs
+        timeout-minutes: 5
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "satir daily report: ${{ steps.date.outputs.target }}"
+          git pull --rebase origin main
+          git push

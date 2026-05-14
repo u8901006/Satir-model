@@ -1,0 +1,105 @@
+import { readdirSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+
+const DOCS_DIR = "docs";
+const dayNames = ["日", "一", "二", "三", "四", "五", "六"];
+
+function sanitizeHtml(str) {
+  if (typeof str !== "string") return String(str);
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function formatDate(isoDate) {
+  try {
+    const d = new Date(isoDate + "T00:00:00+08:00");
+    if (isNaN(d.getTime())) return isoDate;
+    const wd = dayNames[d.getDay()];
+    return `${isoDate}（星期${wd}）`;
+  } catch {
+    return isoDate;
+  }
+}
+
+function getReports() {
+  if (!existsSync(DOCS_DIR)) return [];
+  return readdirSync(DOCS_DIR)
+    .filter((f) => /^satir-\d{4}-\d{2}-\d{2}\.html$/.test(f))
+    .map((f) => f.replace("satir-", "").replace(".html", ""))
+    .sort((a, b) => b.localeCompare(a));
+}
+
+function generateIndexHtml(reports) {
+  const now = new Date();
+  const taipeiTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Taipei" }));
+  const updatedDate = `${taipeiTime.getFullYear()}-${String(taipeiTime.getMonth() + 1).padStart(2, "0")}-${String(taipeiTime.getDate()).padStart(2, "0")}`;
+
+  const listItems = reports.slice(0, 60).map((date) => {
+    const display = formatDate(date);
+    return `<li style="margin-bottom:10px;padding:12px 18px;background:var(--card-bg);border-radius:14px;box-shadow:0 1px 6px rgba(139,79,43,0.06);transition:transform .15s"
+        onmouseover="this.style.transform='translateX(4px)'" onmouseout="this.style.transform=''">
+      <a href="satir-${date}.html" style="text-decoration:none;color:var(--text);font-size:0.95em;display:block">
+        ${sanitizeHtml(display)}
+      </a>
+    </li>`;
+  }).join("");
+
+  return `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>薩提爾模式每日研究文獻報告</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f1e8;--surface:#fffaf2;--line:#d8c5ab;--text:#2b2118;--muted:#766453;--accent:#8c4f2b;--accent-soft:#ead2bf;--card-bg:color-mix(in srgb,var(--surface) 92%,white)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:radial-gradient(circle at top,#fff6ea 0,var(--bg) 55%,#ead8c6 100%);font-family:"Noto Sans TC","PingFang TC","Helvetica Neue",Arial,sans-serif;color:var(--text);min-height:100vh;line-height:1.6}
+.container{max-width:640px;margin:0 auto;padding:40px 20px 48px}
+h1{font-size:1.5em;text-align:center;margin-bottom:6px;color:var(--text)}
+.subtitle{text-align:center;color:var(--muted);font-size:0.88em;margin-bottom:8px}
+.updated{text-align:center;color:var(--muted);font-size:0.78em;margin-bottom:32px}
+ul{list-style:none;padding:0}
+.footer{text-align:center;padding:32px 0 16px;border-top:1px solid var(--line);margin-top:36px}
+.footer a{color:var(--accent);text-decoration:none;font-size:0.88em;margin:0 12px}
+.footer a:hover{text-decoration:underline}
+.footer-copy{color:var(--muted);font-size:0.78em;margin-top:12px}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{animation:fadeUp .4s ease both}
+@media(max-width:600px){.container{padding:24px 12px 36px}h1{font-size:1.2em}}
+</style>
+</head>
+<body>
+<div class="container fade-up">
+<h1>🏔️ 薩提爾模式每日研究文獻報告</h1>
+<p class="subtitle">Satir Model Daily Research Literature Report</p>
+<p class="updated">最後更新：${sanitizeHtml(updatedDate)} · 共 ${reports.length} 份報告</p>
+<ul>${listItems}</ul>
+<div class="footer">
+<p>
+<a href="https://www.leepsyclinic.com/" target="_blank" rel="noopener noreferrer">🏥 李政洋身心診所首頁</a>
+<a href="https://blog.leepsyclinic.com/" target="_blank" rel="noopener noreferrer">📬 訂閱電子報</a>
+<a href="https://buymeacoffee.com/CYlee" target="_blank" rel="noopener noreferrer">☕ Buy me a coffee</a>
+</p>
+<p class="footer-copy">
+<a href="https://github.com/u8901006/Satir-model" target="_blank" rel="noopener noreferrer" style="color:var(--muted)">GitHub</a>
+· Powered by Zhipu AI + GitHub Actions
+</p>
+</div>
+</div>
+</body>
+</html>`;
+}
+
+function main() {
+  const reports = getReports();
+  if (reports.length === 0) {
+    console.log("No reports found");
+    return;
+  }
+  const html = generateIndexHtml(reports);
+  writeFileSync(join(DOCS_DIR, "index.html"), html);
+  console.log(`Index generated: ${reports.length} reports`);
+}
+
+main();
